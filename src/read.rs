@@ -199,6 +199,194 @@ impl<R: AsyncWrite + Read> AsyncWrite for XzDecoder<R> {
     }
 }
 
+/// A compression stream which wraps an uncompressed stream of data. Compressed
+/// data will be read from the stream.
+pub struct LzmaEncoder<R: Read> {
+    inner: bufread::LzmaEncoder<BufReader<R>>,
+}
+
+/// A decompression stream which wraps a compressed stream of data. Decompressed
+/// data will be read from the stream.
+pub struct LzmaDecoder<R: Read> {
+    inner: bufread::LzmaDecoder<BufReader<R>>,
+}
+
+impl<R: Read> LzmaEncoder<R> {
+    /// Create a new compression stream which will compress at the given level
+    /// to read compress output to the give output stream.
+    ///
+    /// The `level` argument here is typically 0-9 with 6 being a good default.
+    pub fn new(r: R, level: u32) -> LzmaEncoder<R> {
+        LzmaEncoder {
+            inner: bufread::LzmaEncoder::new(BufReader::new(r), level),
+        }
+    }
+
+    /// Creates a new encoder with a custom `Stream`.
+    ///
+    /// The `Stream` can be pre-configured for multithreaded encoding, different
+    /// compression options/tuning, etc.
+    pub fn new_stream(r: R, stream: Stream) -> LzmaEncoder<R> {
+        LzmaEncoder {
+            inner: bufread::LzmaEncoder::new_stream(BufReader::new(r), stream),
+        }
+    }
+
+    /// Acquires a reference to the underlying stream
+    pub fn get_ref(&self) -> &R {
+        self.inner.get_ref().get_ref()
+    }
+
+    /// Acquires a mutable reference to the underlying stream
+    ///
+    /// Note that mutation of the stream may result in surprising results if
+    /// this encoder is continued to be used.
+    pub fn get_mut(&mut self) -> &mut R {
+        self.inner.get_mut().get_mut()
+    }
+
+    /// Unwrap the underlying writer, finishing the compression stream.
+    pub fn into_inner(self) -> R {
+        self.inner.into_inner().into_inner()
+    }
+
+    /// Returns the number of bytes produced by the compressor
+    /// (e.g. the number of bytes read from this stream)
+    ///
+    /// Note that, due to buffering, this only bears any relation to
+    /// total_in() when the compressor chooses to flush its data
+    /// (unfortunately, this won't happen this won't happen in general
+    /// at the end of the stream, because the compressor doesn't know
+    /// if there's more data to come).  At that point,
+    /// `total_out() / total_in()` would be the compression ratio.
+    pub fn total_out(&self) -> u64 {
+        self.inner.total_out()
+    }
+
+    /// Returns the number of bytes consumed by the compressor
+    /// (e.g. the number of bytes read from the underlying stream)
+    pub fn total_in(&self) -> u64 {
+        self.inner.total_in()
+    }
+}
+
+impl<R: Read> Read for LzmaEncoder<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<R: AsyncRead> AsyncRead for LzmaEncoder<R> {}
+
+impl<W: Write + Read> Write for LzmaEncoder<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.get_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.get_mut().flush()
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<R: AsyncWrite + Read> AsyncWrite for LzmaEncoder<R> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        self.get_mut().shutdown()
+    }
+}
+
+impl<R: Read> LzmaDecoder<R> {
+    /// Create a new decompression stream, which will read compressed
+    /// data from the given input stream, and decompress one lzma stream.
+    /// It may also consume input data that follows the lzma stream.
+    /// Use [`xz::bufread::LzmaDecoder`] instead to process a mix of lzma and non-lzma data.
+    pub fn new(r: R) -> LzmaDecoder<R> {
+        LzmaDecoder {
+            inner: bufread::LzmaDecoder::new(BufReader::new(r)),
+        }
+    }
+
+    /// Create a new decompression stream, which will read compressed
+    /// data from the given input and decompress all the lzma stream it contains.
+    pub fn new_multi_decoder(r: R) -> LzmaDecoder<R> {
+        LzmaDecoder {
+            inner: bufread::LzmaDecoder::new_multi_decoder(BufReader::new(r)),
+        }
+    }
+
+    /// Creates a new decoder with a custom `Stream`.
+    ///
+    /// The `Stream` can be pre-configured for various checks, different
+    /// decompression options/tuning, etc.
+    pub fn new_stream(r: R, stream: Stream) -> LzmaDecoder<R> {
+        LzmaDecoder {
+            inner: bufread::LzmaDecoder::new_stream(BufReader::new(r), stream),
+        }
+    }
+
+    /// Acquires a reference to the underlying stream
+    pub fn get_ref(&self) -> &R {
+        self.inner.get_ref().get_ref()
+    }
+
+    /// Acquires a mutable reference to the underlying stream
+    ///
+    /// Note that mutation of the stream may result in surprising results if
+    /// this encoder is continued to be used.
+    pub fn get_mut(&mut self) -> &mut R {
+        self.inner.get_mut().get_mut()
+    }
+
+    /// Unwrap the underlying writer, finishing the compression stream.
+    pub fn into_inner(self) -> R {
+        self.inner.into_inner().into_inner()
+    }
+
+    /// Returns the number of bytes produced by the decompressor
+    /// (e.g. the number of bytes read from this stream)
+    ///
+    /// Note that, due to buffering, this only bears any relation to
+    /// total_in() when the decompressor reaches a sync point
+    /// (e.g. where the original compressed stream was flushed).
+    /// At that point, `total_in() / total_out()` is the compression ratio.
+    pub fn total_out(&self) -> u64 {
+        self.inner.total_out()
+    }
+
+    /// Returns the number of bytes consumed by the decompressor
+    /// (e.g. the number of bytes read from the underlying stream)
+    pub fn total_in(&self) -> u64 {
+        self.inner.total_in()
+    }
+}
+
+impl<R: Read> Read for LzmaDecoder<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<R: AsyncRead + Read> AsyncRead for LzmaDecoder<R> {}
+
+impl<W: Write + Read> Write for LzmaDecoder<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.get_mut().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.get_mut().flush()
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<R: AsyncWrite + Read> AsyncWrite for LzmaDecoder<R> {
+    fn shutdown(&mut self) -> Poll<(), io::Error> {
+        self.get_mut().shutdown()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::read::{XzDecoder, XzEncoder};

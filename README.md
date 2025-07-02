@@ -1,3 +1,7 @@
+# Fork contents
+
+Included LZMA format encoder/decoder in `bufread` and `read` modules. `write` module left unimplemented because other modules do the work already.
+
 # xz2
 
 [Documentation](https://docs.rs/xz2)
