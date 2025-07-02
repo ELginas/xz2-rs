@@ -13,6 +13,9 @@ read/write xz streams.
 # Cargo.toml
 [dependencies]
 xz2 = "0.1"
+
+[patch.crates-io]
+xz2 = { git = "https://github.com/ELginas/xz2-rs.git" }
 ```
 
 
